@@ -11,6 +11,8 @@ from datetime import datetime, timezone
 AOZORABUNKO_REPO_PATH = os.environ["AOZORABUNKO_REPO_PATH"]
 OUTPUT_PATH = os.environ["OUTPUT_PATH"]
 
+STYLE_VERSION = "1.0.0"
+
 
 class BookMetadata(NamedTuple):
     title: str
@@ -128,8 +130,8 @@ def main():
         "raw_body BLOB NOT NULL,"
         "body_text_rb_major TEXT NOT NULL,"
         "body_text_rt_major TEXT NOT NULL,"
-        "footnore_raw BLOB NOT NULL,"
-        "footnore_text TEXT NOT NULL,"
+        "colophon_raw BLOB NOT NULL,"
+        "colophon_text TEXT NOT NULL,"
         "license TEXT,"
         "UNIQUE(card_id, minor_key),"
         "FOREIGN KEY(card_id) REFERENCES cards(id))"
@@ -147,6 +149,7 @@ def main():
             if file.endswith(".html") and "_" in file:
                 html_files += [os.path.join(root, file)]
     tqdm.write(f"found {len(html_files)} files")
+    html_files.sort()
 
     try:
         for file_idx, filename in enumerate(tqdm(html_files)):
@@ -271,8 +274,9 @@ def main():
 
                 # CC ライセンスに ND もしくは SA を含むならスキップ
                 if book_info.license is not None:
-                    cc = [x.lower() for x in book_info.license.split("/")[3].split("-")]
+                    cc = [x.lower() for x in book_info.license.split("/")[4].split("-")]
                     if "nd" in cc or "sa" in cc:
+                        tqdm.write(f"skipped: {filename} (reason: CC {cc})")
                         continue
             except Exception as e:
                 print("skipped:", filename)
@@ -281,21 +285,21 @@ def main():
 
             c.execute(
                 "INSERT INTO books "
-                "(card_id, minor_key, raw_body, body_text_rb_major, body_text_rt_major, footnore_raw, footnore_text, license) "
+                "(card_id, minor_key, raw_body, body_text_rb_major, body_text_rt_major, colophon_raw, colophon_text, license) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     card_id,
                     minor_key,
-                    zlib.compress(book_info.raw_body.encode("utf-8")),
+                    zlib.compress(book_info.body_raw.encode("utf-8")),
                     book_info.body_text_rb_major,
                     book_info.body_text_rt_major,
-                    zlib.compress(book_info.footnote_raw.encode("utf-8")),
-                    book_info.footnote_text,
+                    zlib.compress(book_info.colophon_raw.encode("utf-8")),
+                    book_info.colophon_text,
                     book_info.license,
                 ),
             )
 
-            if file_idx > 0 and file_idx % 1000 == 0:
+            if file_idx > 0 and file_idx % 100 == 0:
                 conn.commit()
     except Exception as e:
         print(filename)
@@ -316,7 +320,7 @@ def main():
     date = date.astimezone(timezone.utc)
     c.execute(
         "INSERT INTO metadata (style, commit_hash, date) VALUES (?, ?, ?)",
-        ("1.0.0", hash, date.strftime("%Y-%m-%d %H:%M:%S %z")),
+        (STYLE_VERSION, hash, date.strftime("%Y-%m-%d %H:%M:%S %z")),
     )
     conn.commit()
     conn.close()
