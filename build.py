@@ -7,6 +7,7 @@ from card_parser import parse_card
 from book_parser import parse_book
 import subprocess
 from datetime import datetime, timezone
+from normalizers import normalize_reading
 
 AOZORABUNKO_REPO_PATH = os.environ["AOZORABUNKO_REPO_PATH"]
 OUTPUT_PATH = os.environ["OUTPUT_PATH"]
@@ -44,6 +45,7 @@ def main():
         "aozora_id INTEGER NOT NULL UNIQUE,"
         "name TEXT NOT NULL,"
         "name_reading TEXT NOT NULL,"
+        "name_key TEXT NOT NULL,"
         "name_roman TEXT NOT NULL,"
         "birth TEXT,"
         "death TEXT)"
@@ -52,6 +54,7 @@ def main():
     c.execute(
         "CREATE INDEX IF NOT EXISTS idx_authors_name_reading ON authors (name_reading)"
     )
+    c.execute("CREATE INDEX IF NOT EXISTS idx_authors_name_key ON authors (name_key)")
     c.execute(
         "CREATE INDEX IF NOT EXISTS idx_authors_name_roman ON authors (name_roman)"
     )
@@ -66,8 +69,10 @@ def main():
         "major_key INTEGER NOT NULL UNIQUE,"
         "title TEXT NOT NULL,"
         "title_reading TEXT NOT NULL,"
+        "title_key TEXT NOT NULL,"
         "subtitle TEXT,"
         "subtitle_reading TEXT,"
+        "subtitle_key TEXT,"
         "original_title TEXT,"
         "anthology_id INTEGER,"
         "author_id INTEGER,"
@@ -83,9 +88,13 @@ def main():
     c.execute(
         "CREATE INDEX IF NOT EXISTS idx_cards_title_reading ON cards (title_reading)"
     )
+    c.execute("CREATE INDEX IF NOT EXISTS idx_cards_title_key ON cards (title_key)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_cards_subtitle ON cards (subtitle)")
     c.execute(
         "CREATE INDEX IF NOT EXISTS idx_cards_subtitle_reading ON cards (subtitle_reading)"
+    )
+    c.execute(
+        "CREATE INDEX IF NOT EXISTS idx_cards_subtitle_key ON cards (subtitle_key)"
     )
     c.execute(
         "CREATE INDEX IF NOT EXISTS idx_cards_original_title ON cards (original_title)"
@@ -201,11 +210,12 @@ def main():
 
                 for author in card_info.authors:
                     c.execute(
-                        "INSERT OR IGNORE INTO authors (aozora_id, name, name_reading, name_roman, birth, death) VALUES (?, ?, ?, ?, ?, ?)",
+                        "INSERT OR IGNORE INTO authors (aozora_id, name, name_reading, name_key, name_roman, birth, death) VALUES (?, ?, ?, ?, ?, ?, ?)",
                         (
                             author.aozora_id,
                             author.name,
                             author.name_reading,
+                            normalize_reading(author.name_reading),
                             author.name_roman,
                             author.birth,
                             author.death,
@@ -220,15 +230,21 @@ def main():
 
                 c.execute(
                     "INSERT INTO cards"
-                    "(major_key, title, title_reading, subtitle, subtitle_reading, original_title, anthology_id, author_id, style_id, note, first)"
-                    "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                    "(major_key, title, title_reading, title_key, subtitle, subtitle_reading, subtitle_key, original_title, anthology_id, author_id, style_id, note, first)"
+                    "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
                     "RETURNING id",
                     (
                         major_key,
                         card_info.title.title,
                         card_info.title.title_reading,
+                        normalize_reading(card_info.title.title_reading),
                         card_info.title.subtitle,
                         card_info.title.subtitle_reading,
+                        (
+                            normalize_reading(card_info.title.subtitle_reading)
+                            if card_info.title.subtitle_reading
+                            else None
+                        ),
                         card_info.title.original_title,
                         anthology_id,
                         author_id,
@@ -285,8 +301,8 @@ def main():
                         tqdm.write(f"skipped: {filename} (reason: CC {cc})")
                         continue
             except Exception as e:
-                print("skipped:", filename)
-                print(e)
+                tqdm.write(f"skipped: {filename}")
+                tqdm.write(f"{e}")
                 continue
 
             c.execute(

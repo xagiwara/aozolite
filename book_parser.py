@@ -22,16 +22,10 @@ def extract_text(main_text: BeautifulSoup, major: Literal["rb", "rt"]) -> str:
         "※": "\uFFFD",  # U+FFFD: REPLACEMENT CHARACTER
         "／＼": "\u3031",  # U+3031: VERTICAL KANA REPEAT MARK
         "／″＼": "\u3032",  # U+3032: VERTICAL KANA REPEAT WITH VOICED SOUND MARK
-        "\n": "",
-        "\r": "",
     }
 
     for ruby in main_text.find_all("ruby"):
         ruby.replace_with(ruby.find(major).text)
-
-    for text, replace in replace_texts.items():
-        for e in main_text.find_all(string=text):
-            e.replace_with(replace)
 
     for gaiji in main_text.find_all("img", class_="gaiji"):
         gaiji.replace_with("\uFFFD")
@@ -42,10 +36,18 @@ def extract_text(main_text: BeautifulSoup, major: Literal["rb", "rt"]) -> str:
     for note in main_text.find_all("span", class_="notes"):
         note.replace_with("")
 
+    for br in main_text.find_all(string="\n"):
+        br.replace_with("")
+
     for br in main_text.find_all("br"):
         br.replace_with("\n")
 
     text = main_text.get_text()
+    text = unicodedata.normalize("NFC", text)
+
+    for key, replace in replace_texts.items():
+        text = text.replace(key, replace)
+
     text = "\n".join([x.strip() for x in text.split("\n") if x.strip() != ""])
     text = unicodedata.normalize("NFKC", text)
     return text
@@ -77,7 +79,7 @@ def extract_license(soup: BeautifulSoup) -> str | None:
 
 
 def parse_book(path: str):
-    with open(path, "rb") as f:
+    with open(path, "r", encoding="cp932") as f:
         soup = BeautifulSoup(f, "html.parser")
 
     main_text = soup.find("div", class_="main_text")
