@@ -91,10 +91,10 @@ def parse_book(path: str):
     license = extract_license(soup)
 
     return BookData(
-        raw_body=body_raw,
+        body_raw=body_raw,
         body_text_rb_major=body_text_rb_major,
         body_text_rt_major=body_text_rt_major,
-        footnote_raw=colophon_raw,
-        footnote_text=colophon_text,
+        colophon_raw=colophon_raw,
+        colophon_text=colophon_text,
         license=license,
     )

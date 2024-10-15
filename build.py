@@ -64,7 +64,6 @@ def main():
         "CREATE TABLE IF NOT EXISTS cards ("
         "id INTEGER PRIMARY KEY,"
         "major_key INTEGER NOT NULL UNIQUE,"
-        "author_key INTEGER NOT NULL,"
         "title TEXT NOT NULL,"
         "title_reading TEXT NOT NULL,"
         "subtitle TEXT,"
@@ -127,7 +126,7 @@ def main():
         "id INTEGER PRIMARY KEY,"
         "card_id INTEGER NOT NULL,"
         "minor_key INTEGER NOT NULL,"
-        "raw_body BLOB NOT NULL,"
+        "body_raw BLOB NOT NULL,"
         "body_text_rb_major TEXT NOT NULL,"
         "body_text_rt_major TEXT NOT NULL,"
         "colophon_raw BLOB NOT NULL,"
@@ -200,21 +199,39 @@ def main():
                 )
                 (style_id,) = c.fetchone()
 
+                for author in card_info.authors:
+                    c.execute(
+                        "INSERT OR IGNORE INTO authors (aozora_id, name, name_reading, name_roman, birth, death) VALUES (?, ?, ?, ?, ?, ?)",
+                        (
+                            author.aozora_id,
+                            author.name,
+                            author.name_reading,
+                            author.name_roman,
+                            author.birth,
+                            author.death,
+                        ),
+                    )
+
+                c.execute(
+                    "SELECT id FROM authors WHERE aozora_id = ?",
+                    (card_info.title.author,),
+                )
+                (author_id,) = c.fetchone()
+
                 c.execute(
                     "INSERT INTO cards"
-                    "(major_key, author_key, title, title_reading, subtitle, subtitle_reading, original_title, anthology_id, author_id, style_id, note, first)"
-                    "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                    "(major_key, title, title_reading, subtitle, subtitle_reading, original_title, anthology_id, author_id, style_id, note, first)"
+                    "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
                     "RETURNING id",
                     (
                         major_key,
-                        author_key,
                         card_info.title.title,
                         card_info.title.title_reading,
                         card_info.title.subtitle,
                         card_info.title.subtitle_reading,
                         card_info.title.original_title,
                         anthology_id,
-                        card_info.title.author,
+                        author_id,
                         style_id,
                         card_info.info.note,
                         card_info.info.first,
@@ -229,17 +246,6 @@ def main():
                     )
 
                 for author in card_info.authors:
-                    c.execute(
-                        "INSERT OR IGNORE INTO authors (aozora_id, name, name_reading, name_roman, birth, death) VALUES (?, ?, ?, ?, ?, ?)",
-                        (
-                            author.aozora_id,
-                            author.name,
-                            author.name_reading,
-                            author.name_roman,
-                            author.birth,
-                            author.death,
-                        ),
-                    )
                     c.execute(
                         "SELECT id FROM authors WHERE aozora_id = ?",
                         (author.aozora_id,),
@@ -285,7 +291,7 @@ def main():
 
             c.execute(
                 "INSERT INTO books "
-                "(card_id, minor_key, raw_body, body_text_rb_major, body_text_rt_major, colophon_raw, colophon_text, license) "
+                "(card_id, minor_key, body_raw, body_text_rb_major, body_text_rt_major, colophon_raw, colophon_text, license) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     card_id,
