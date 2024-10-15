@@ -34,4 +34,7 @@ def normalize_reading(text: str) -> str:
     for k, v in normalize_katakana.items():
         text = text.replace(k, v)
     text = "".join([x for x in text if x in charset])
-    return text
+    text = (
+        unicodedata.normalize("NFKD", text).replace("\u3099", "").replace("\u309a", "")
+    )
+    return unicodedata.normalize("NFKC", text)
