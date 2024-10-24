@@ -49,7 +49,6 @@ def extract_text(main_text: BeautifulSoup, major: Literal["rb", "rt"]) -> str:
         text = text.replace(key, replace)
 
     text = "\n".join([x.strip() for x in text.split("\n") if x.strip() != ""])
-    text = unicodedata.normalize("NFKC", text)
     return text
 
 
