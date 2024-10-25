@@ -14,8 +14,6 @@ git clone --filter=tree:0 https://github.com/aozorabunko/aozorabunko.git
 
 出力先は環境変数 `OUTPUT_PATH` で指定
 
-TODO: `argparse` 使いたい
-
 ## 備考
 
 - CC ライセンス（著作権有効）かつ、ND（改変禁止）を含む場合はスキップする

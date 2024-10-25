@@ -11,9 +11,6 @@ from normalizers import normalize_reading
 from logging import getLogger
 from tqdm.contrib.logging import logging_redirect_tqdm
 
-AOZORABUNKO_REPO_PATH = os.environ["AOZORABUNKO_REPO_PATH"]
-OUTPUT_PATH = os.environ["OUTPUT_PATH"]
-
 STYLE_VERSION = "1.0.1"
 
 logger = getLogger(__name__)
@@ -28,10 +25,12 @@ class BookMetadata(NamedTuple):
     translator: str | None
 
 
-def main():
-    os.makedirs(os.path.dirname(OUTPUT_PATH), exist_ok=True)
+def main(aozorabunko_repo_path: str, output_path: str, **kwargs):
+    kwargs
 
-    conn = sqlite3.connect(OUTPUT_PATH, autocommit=False)
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+
+    conn = sqlite3.connect(output_path, autocommit=False)
     c = conn.cursor()
     c.execute("DROP TABLE IF EXISTS metadata")
     c.execute(
@@ -151,10 +150,10 @@ def main():
     c.execute("CREATE INDEX IF NOT EXISTS idx_books_card_id ON books (card_id)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_books_minor_key ON books (minor_key)")
 
-    logger.info(f"searching for book files in {AOZORABUNKO_REPO_PATH}")
+    logger.info(f"searching for book files in {aozorabunko_repo_path}")
 
     html_files: list[str] = []
-    for root, dirs, files in os.walk(os.path.join(AOZORABUNKO_REPO_PATH, "cards")):
+    for root, dirs, files in os.walk(os.path.join(aozorabunko_repo_path, "cards")):
         if os.path.basename(root) != "files":
             continue
         for file in files:
@@ -183,7 +182,7 @@ def main():
             else:
                 card_info = parse_card(
                     os.path.join(
-                        AOZORABUNKO_REPO_PATH,
+                        aozorabunko_repo_path,
                         "cards",
                         f"{author_key:06}",
                         f"card{major_key}.html",
@@ -291,7 +290,7 @@ def main():
             try:
                 book_info = parse_book(
                     os.path.join(
-                        AOZORABUNKO_REPO_PATH,
+                        aozorabunko_repo_path,
                         "cards",
                         f"{author_key:06}",
                         "files",
@@ -340,7 +339,7 @@ def main():
     proc = subprocess.run(
         ["git", "log", "-1", "--pretty=format:%ci\t%H"],
         capture_output=True,
-        cwd=AOZORABUNKO_REPO_PATH,
+        cwd=aozorabunko_repo_path,
         encoding="utf-8",
     )
     date, hash = proc.stdout.strip().split("\t")
@@ -356,7 +355,7 @@ def main():
 
     logger.info("Vacuuming...")
 
-    conn = sqlite3.connect(OUTPUT_PATH, autocommit=True)
+    conn = sqlite3.connect(output_path, autocommit=True)
     conn.executescript("VACUUM")
     conn.close()
 
@@ -364,6 +363,19 @@ def main():
 
 
 if __name__ == "__main__":
-    logger.setLevel("INFO")
+    from argparse import ArgumentParser
+
+    parser = ArgumentParser()
+    parser.add_argument("--log-level", default="INFO")
+    parser.add_argument("--output-path", default=None)
+    parser.add_argument("--aozorabunko-repo-path", default=None)
+    args = parser.parse_args()
+
+    if args.output_path is None:
+        args.output_path = os.environ["OUTPUT_PATH"]
+    if args.aozorabunko_repo_path is None:
+        args.aozorabunko_repo_path = os.environ["AOZORABUNKO_REPO_PATH"]
+
+    logger.setLevel(args.log_level.upper())
     with logging_redirect_tqdm(loggers=[logger]):
-        main()
+        main(**vars(args))
