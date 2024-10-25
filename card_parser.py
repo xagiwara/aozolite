@@ -40,7 +40,7 @@ class CardData(NamedTuple):
     authors: list[AuthorInfo]
 
 
-person_pattern = r".*/person(\d+)\.html$"
+person_pattern = re.compile(r".*/person(\d+)\.html$")
 
 
 def find_person(elm: BeautifulSoup):
