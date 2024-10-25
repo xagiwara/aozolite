@@ -120,25 +120,25 @@ def create_tables(conn: sqlite3.Connection):
     )
     conn.execute(
         """
-        CREATE TABLE IF NOT EXISTS card_authors (
+        CREATE TABLE IF NOT EXISTS book_authors (
             id INTEGER PRIMARY KEY,
-            card_id INTEGER NOT NULL,
+            book_id INTEGER NOT NULL,
             author_id INTEGER NOT NULL,
             role_id INTEGER NOT NULL,
-            FOREIGN KEY (card_id) REFERENCES books (id),
+            FOREIGN KEY (book_id) REFERENCES books (id),
             FOREIGN KEY (author_id) REFERENCES authors (id),
             FOREIGN KEY (role_id) REFERENCES author_roles (id))
         """
     )
     # conn.execute("CREATE INDEX IF NOT EXISTS books_copyright_expired ON books (copyright_expired)")
     conn.execute(
-        "CREATE INDEX IF NOT EXISTS card_authors_card_id ON card_authors (card_id)"
+        "CREATE INDEX IF NOT EXISTS book_authors_book_id ON book_authors (book_id)"
     )
     conn.execute(
-        "CREATE INDEX IF NOT EXISTS card_authors_author_id ON card_authors (author_id)"
+        "CREATE INDEX IF NOT EXISTS book_authors_author_id ON book_authors (author_id)"
     )
     conn.execute(
-        "CREATE INDEX IF NOT EXISTS card_authors_role_id ON card_authors (role_id)"
+        "CREATE INDEX IF NOT EXISTS book_authors_role_id ON book_authors (role_id)"
     )
     conn.execute("CREATE INDEX IF NOT EXISTS author_roles_role ON author_roles (role)")
 
@@ -163,31 +163,31 @@ def write_rows(conn: sqlite3.Connection, books: list[BookInfo]):
         "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, (SELECT id FROM styles WHERE style = ?))",
         (
             (
-                card.id,
-                normalize_text(card.title),
-                card.title_reading,
-                normalize_reading(card.title_key),
-                normalize_text(card.subtitle) if card.subtitle else None,
-                card.subtitle_reading,
-                card.original_title,
-                card.first,
-                card.copyright_expired,
-                card.author_id,
-                card.style,
+                book.id,
+                normalize_text(book.title),
+                book.title_reading,
+                normalize_reading(book.title_key),
+                normalize_text(book.subtitle) if book.subtitle else None,
+                book.subtitle_reading,
+                book.original_title,
+                book.first,
+                book.copyright_expired,
+                book.author_id,
+                book.style,
             )
-            for card in books
+            for book in books
         ),
     )
     conn.executemany(
-        "INSERT OR REPLACE INTO card_authors (card_id, author_id, role_id) VALUES (?, ?, (SELECT id FROM author_roles WHERE role = ?))",
+        "INSERT OR REPLACE INTO book_authors (book_id, author_id, role_id) VALUES (?, ?, (SELECT id FROM author_roles WHERE role = ?))",
         (
             (
-                card.id,
+                book.id,
                 author.id,
                 author.role,
             )
-            for card in books
-            for author in card.authors
+            for book in books
+            for author in book.authors
         ),
     )
     conn.commit()

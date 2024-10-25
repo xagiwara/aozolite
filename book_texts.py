@@ -125,7 +125,7 @@ def create_tables(conn: sqlite3.Connection):
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS book_texts (
-            card_id INTEGER NOT NULL,
+            book_id INTEGER NOT NULL,
             revision INTEGER NOT NULL,
             body_raw BLOB NOT NULL,
             body_text_rb_major TEXT NOT NULL,
@@ -133,13 +133,13 @@ def create_tables(conn: sqlite3.Connection):
             colophon_raw BLOB NOT NULL,
             colophon_text TEXT NOT NULL,
             license TEXT,
-            FOREIGN KEY (card_id) REFERENCES cards(id),
-            UNIQUE (card_id, revision)
+            FOREIGN KEY (book_id) REFERENCES books(id),
+            UNIQUE (book_id, revision)
         )
         """
     )
     conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_book_texts_card_id ON book_texts(card_id)"
+        "CREATE INDEX IF NOT EXISTS idx_book_texts_book_id ON book_texts(book_id)"
     )
 
 

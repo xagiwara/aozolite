@@ -100,7 +100,7 @@ def main(aozorabunko_repo_path: str, output_path: str, **kwargs):
     try:
         for i, (author_id, book_id, version_id) in enumerate(tqdm(book_files)):
             c.execute(
-                "SELECT EXISTS(SELECT 1 FROM book_texts WHERE card_id = ? AND revision = ?)",
+                "SELECT EXISTS(SELECT 1 FROM book_texts WHERE book_id = ? AND revision = ?)",
                 (book_id, version_id),
             )
             (exists,) = c.fetchone()
@@ -132,7 +132,7 @@ def main(aozorabunko_repo_path: str, output_path: str, **kwargs):
                         continue
 
                 c.execute(
-                    "INSERT INTO book_texts (card_id, revision, body_raw, body_text_rb_major, body_text_rt_major, colophon_raw, colophon_text, license) "
+                    "INSERT INTO book_texts (book_id, revision, body_raw, body_text_rb_major, body_text_rt_major, colophon_raw, colophon_text, license) "
                     "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         book_id,
