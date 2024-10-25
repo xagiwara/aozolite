@@ -8,11 +8,15 @@ from book_parser import parse_book
 import subprocess
 from datetime import datetime, timezone
 from normalizers import normalize_reading
+from logging import getLogger
+from tqdm.contrib.logging import logging_redirect_tqdm
 
 AOZORABUNKO_REPO_PATH = os.environ["AOZORABUNKO_REPO_PATH"]
 OUTPUT_PATH = os.environ["OUTPUT_PATH"]
 
 STYLE_VERSION = "1.0.1"
+
+logger = getLogger(__name__)
 
 
 class BookMetadata(NamedTuple):
@@ -147,7 +151,7 @@ def main():
     c.execute("CREATE INDEX IF NOT EXISTS idx_books_card_id ON books (card_id)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_books_minor_key ON books (minor_key)")
 
-    tqdm.write(f"searching for book files in {AOZORABUNKO_REPO_PATH}")
+    logger.info(f"searching for book files in {AOZORABUNKO_REPO_PATH}")
 
     html_files: list[str] = []
     for root, dirs, files in os.walk(os.path.join(AOZORABUNKO_REPO_PATH, "cards")):
@@ -156,7 +160,7 @@ def main():
         for file in files:
             if file.endswith(".html") and "_" in file:
                 html_files += [os.path.join(root, file)]
-    tqdm.write(f"found {len(html_files)} files")
+    logger.info(f"found {len(html_files)} files")
     html_files.sort()
 
     try:
@@ -189,7 +193,10 @@ def main():
                 if card_info.title.anthology:
                     c.execute(
                         "INSERT OR IGNORE INTO anthologies (name, reading) VALUES (?, ?)",
-                        (card_info.title.anthology, card_info.title.anthology_reading),
+                        (
+                            card_info.title.anthology,
+                            card_info.title.anthology_reading,
+                        ),
                     )
                     c.execute(
                         "SELECT id FROM anthologies WHERE name = ?",
@@ -298,11 +305,11 @@ def main():
                 if book_info.license is not None:
                     cc = [x.lower() for x in book_info.license.split("/")[4].split("-")]
                     if "nd" in cc or "sa" in cc:
-                        tqdm.write(f"skipped: {filename} (reason: CC {cc})")
+                        logger.info(f"skipped: {filename} (reason: CC {cc})")
                         continue
             except Exception as e:
-                tqdm.write(f"skipped: {filename}")
-                tqdm.write(f"{e}")
+                logger.info(f"skipped: {filename}")
+                logger.info(f"{e}")
                 continue
 
             c.execute(
@@ -324,7 +331,7 @@ def main():
             if file_idx > 0 and file_idx % 100 == 0:
                 conn.commit()
     except Exception as e:
-        print(filename)
+        logger.error(filename)
         raise e
 
     conn.commit()
@@ -347,14 +354,16 @@ def main():
     conn.commit()
     conn.close()
 
-    print("Vacuuming...")
+    logger.info("Vacuuming...")
 
     conn = sqlite3.connect(OUTPUT_PATH, autocommit=True)
     conn.executescript("VACUUM")
     conn.close()
 
-    print("Done.")
+    logger.info("Done.")
 
 
 if __name__ == "__main__":
-    main()
+    logger.setLevel("INFO")
+    with logging_redirect_tqdm(loggers=[logger]):
+        main()
