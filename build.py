@@ -308,8 +308,8 @@ def main():
                         logger.info(f"skipped: {filename} (reason: CC {cc})")
                         continue
             except Exception as e:
-                logger.info(f"skipped: {filename}")
-                logger.info(f"{e}")
+                logger.error(f"skipped: {filename}")
+                logger.error(e)
                 continue
 
             c.execute(
