@@ -1,6 +1,7 @@
 from bs4 import BeautifulSoup
 from typing import NamedTuple, Literal
 import re
+from normalizers import normalize_text
 
 # パーサof図書カード
 
@@ -73,19 +74,19 @@ def parse_card(path: str):
         tds = tr.find_all("td")
         k = tds[0].text.strip()
         if k == "作品名：":
-            values["title"] = tds[1].text
+            values["title"] = normalize_text(tds[1].text)
         elif k == "作品名読み：":
-            values["title_reading"] = tds[1].text
+            values["title_reading"] = normalize_text(tds[1].text)
         elif k == "副題：":
-            values["subtitle"] = tds[1].text
+            values["subtitle"] = normalize_text(tds[1].text)
         elif k == "副題読み：":
-            values["subtitle_reading"] = tds[1].text
+            values["subtitle_reading"] = normalize_text(tds[1].text)
         elif k == "原題：":
-            values["original_title"] = tds[1].text
+            values["original_title"] = normalize_text(tds[1].text)
         elif k == "作品集名：":
-            values["anthology"] = tds[1].text
+            values["anthology"] = normalize_text(tds[1].text)
         elif k == "作品集名読み：":
-            values["anthology_reading"] = tds[1].text
+            values["anthology_reading"] = normalize_text(tds[1].text)
         elif k == "著者名：":
             values["author"] = find_person(tds[1])
         else:
@@ -149,11 +150,11 @@ def parse_card(path: str):
                 else:
                     raise ValueError(f"Unknown type: {tds[1].text}")
             elif tds[0].text == "作家名：":
-                values["name"] = tds[1].text
+                values["name"] = normalize_text(tds[1].text)
             elif tds[0].text == "作家名読み：":
-                values["name_reading"] = tds[1].get_text()
+                values["name_reading"] = normalize_text(tds[1].get_text())
             elif tds[0].text == "ローマ字表記：":
-                values["name_roman"] = tds[1].text
+                values["name_roman"] = normalize_text(tds[1].text)
             elif tds[0].text == "生年：":
                 values["birth"] = tds[1].text
             elif tds[0].text == "没年：":

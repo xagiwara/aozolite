@@ -1,7 +1,8 @@
 from bs4 import BeautifulSoup
-import unicodedata
 from typing import Literal, NamedTuple
 import copy
+from normalizers import normalize_text
+import re
 
 # パーサof図書
 
@@ -15,19 +16,20 @@ class BookData(NamedTuple):
     license: str | None
 
 
+unicode_pattern = re.compile(r"U\+([0-9A-F]+)")
+
+
 def extract_text(main_text: BeautifulSoup, major: Literal["rb", "rt"]) -> str:
     main_text = copy.deepcopy(main_text)
-
-    replace_texts = {
-        "※": "\uFFFD",  # U+FFFD: REPLACEMENT CHARACTER
-        "／＼": "\u3031",  # U+3031: VERTICAL KANA REPEAT MARK
-        "／″＼": "\u3032",  # U+3032: VERTICAL KANA REPEAT WITH VOICED SOUND MARK
-    }
 
     for ruby in main_text.find_all("ruby"):
         ruby.replace_with(ruby.find(major).text)
 
     for gaiji in main_text.find_all("img", class_="gaiji"):
+        alt: str = gaiji.attrs["alt"]
+        unicode_match = re.search(unicode_pattern, alt)
+        if unicode_match:
+            gaiji.replace_with(chr(int(unicode_match.group(1), 16)))
         gaiji.replace_with("\uFFFD")
 
     for img in main_text.find_all("img"):
@@ -43,13 +45,7 @@ def extract_text(main_text: BeautifulSoup, major: Literal["rb", "rt"]) -> str:
         br.replace_with("\n")
 
     text = main_text.get_text()
-    text = unicodedata.normalize("NFC", text)
-
-    for key, replace in replace_texts.items():
-        text = text.replace(key, replace)
-
-    text = "\n".join([x.strip() for x in text.split("\n") if x.strip() != ""])
-    return text
+    return normalize_text(text)
 
 
 def extract_colophon(soup: BeautifulSoup) -> tuple[str, str]:

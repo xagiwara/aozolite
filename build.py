@@ -12,7 +12,7 @@ from normalizers import normalize_reading
 AOZORABUNKO_REPO_PATH = os.environ["AOZORABUNKO_REPO_PATH"]
 OUTPUT_PATH = os.environ["OUTPUT_PATH"]
 
-STYLE_VERSION = "1.0.0"
+STYLE_VERSION = "1.0.1"
 
 
 class BookMetadata(NamedTuple):
