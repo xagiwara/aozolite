@@ -30,7 +30,8 @@ def extract_text(main_text: BeautifulSoup, major: Literal["rb", "rt"]) -> str:
         unicode_match = re.search(unicode_pattern, alt)
         if unicode_match:
             gaiji.replace_with(chr(int(unicode_match.group(1), 16)))
-        gaiji.replace_with("\uFFFD")
+        else:
+            gaiji.replace_with("\uFFFD")
 
     for img in main_text.find_all("img"):
         img.replace_with("")
