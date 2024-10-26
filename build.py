@@ -23,6 +23,7 @@ from book_texts import (
     find_files as find_book_files,
     create_tables as create_book_texts_table,
 )
+import shutil
 
 
 STYLE_VERSION = "2.0.0"
@@ -230,6 +231,7 @@ def main(aozorabunko_repo_path: str, output_dir: str, temp_dir: str, **kwargs):
     logger.info("Moving...")
     os.makedirs(os.path.dirname(output_filepath), exist_ok=True)
     os.rename(tmp_filepath, output_filepath)
+    shutil.rmtree(os.path.dirname(tmp_filepath))
     logger.info("Done.")
 
 
