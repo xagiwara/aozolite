@@ -127,7 +127,9 @@ def create_tables(conn: sqlite3.Connection):
             role_id INTEGER NOT NULL,
             FOREIGN KEY (book_id) REFERENCES books (id),
             FOREIGN KEY (author_id) REFERENCES authors (id),
-            FOREIGN KEY (role_id) REFERENCES author_roles (id))
+            FOREIGN KEY (role_id) REFERENCES author_roles (id),
+            UNIQUE (book_id, author_id, role_id)
+        )
         """
     )
     # conn.execute("CREATE INDEX IF NOT EXISTS books_copyright_expired ON books (copyright_expired)")
