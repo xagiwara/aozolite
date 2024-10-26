@@ -64,6 +64,10 @@ def main(aozorabunko_repo_path: str, output_dir: str, temp_dir: str, **kwargs):
         f"{date.strftime("%Y%m%d-%H%M%S")}_{hash[:6]}.db",
     )
 
+    if os.path.exists(output_filepath):
+        logger.info(f"already exists: {tmp_filepath}")
+        return
+
     os.makedirs(os.path.dirname(tmp_filepath), exist_ok=True)
     conn = sqlite3.connect(tmp_filepath, autocommit=False)
     conn.execute(
