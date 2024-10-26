@@ -16,5 +16,5 @@ git clone --filter=tree:0 https://github.com/aozorabunko/aozorabunko.git
 
 ## 備考
 
-- CC ライセンス（著作権有効）かつ、ND（改変禁止）を含む場合はスキップする
-- CC ライセンス（著作権有効）かつ、SA（継承）を含む場合はスキップする
+- 著作権なしフラグのあるものを収録する
+- 著作権ありフラグがあり、CC ライセンスかつ、ND（改変禁止）も SA（継承）も含まないものを収録する
