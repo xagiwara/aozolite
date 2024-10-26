@@ -7,6 +7,7 @@ import subprocess
 from datetime import datetime, timezone
 from logging import getLogger
 from tqdm.contrib.logging import logging_redirect_tqdm
+from tempfile import gettempdir
 from authors import (
     load_authors,
     create_tables as create_authors_table,
@@ -38,12 +39,33 @@ class BookMetadata(NamedTuple):
     translator: str | None
 
 
-def main(aozorabunko_repo_path: str, output_path: str, **kwargs):
+def main(aozorabunko_repo_path: str, output_dir: str, temp_dir: str, **kwargs):
     kwargs
 
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    # read metadata
+    proc = subprocess.run(
+        ["git", "log", "-1", "--pretty=format:%ci\t%H"],
+        capture_output=True,
+        cwd=aozorabunko_repo_path,
+        encoding="utf-8",
+    )
+    date, hash = proc.stdout.strip().split("\t")
 
-    conn = sqlite3.connect(output_path, autocommit=False)
+    date = datetime.strptime(date, "%Y-%m-%d %H:%M:%S %z")
+    date = date.astimezone(timezone.utc)
+    tmp_filepath = os.path.join(
+        temp_dir,
+        STYLE_VERSION,
+        f"{date.strftime("%Y%m%d-%H%M%S")}_{hash[:6]}.db",
+    )
+    output_filepath = os.path.join(
+        output_dir,
+        STYLE_VERSION,
+        f"{date.strftime("%Y%m%d-%H%M%S")}_{hash[:6]}.db",
+    )
+
+    os.makedirs(os.path.dirname(tmp_filepath), exist_ok=True)
+    conn = sqlite3.connect(tmp_filepath, autocommit=False)
     conn.execute(
         "CREATE TABLE IF NOT EXISTS metadata ("
         "style TEXT NOT NULL,"
@@ -57,16 +79,6 @@ def main(aozorabunko_repo_path: str, output_path: str, **kwargs):
     c = conn.cursor()
 
     # metadata
-    proc = subprocess.run(
-        ["git", "log", "-1", "--pretty=format:%ci\t%H"],
-        capture_output=True,
-        cwd=aozorabunko_repo_path,
-        encoding="utf-8",
-    )
-    date, hash = proc.stdout.strip().split("\t")
-
-    date = datetime.strptime(date, "%Y-%m-%d %H:%M:%S %z")
-    date = date.astimezone(timezone.utc)
     c.execute("DELETE FROM metadata")
     c.execute(
         "INSERT INTO metadata (style, commit_hash, date) VALUES (?, ?, ?)",
@@ -207,10 +219,13 @@ def main(aozorabunko_repo_path: str, output_path: str, **kwargs):
     conn.close()
 
     logger.info("Vacuuming...")
-    conn = sqlite3.connect(output_path, autocommit=True)
+    conn = sqlite3.connect(tmp_filepath, autocommit=True)
     conn.executescript("VACUUM")
     conn.close()
 
+    logger.info("Moving...")
+    os.makedirs(os.path.dirname(output_filepath), exist_ok=True)
+    os.rename(tmp_filepath, output_filepath)
     logger.info("Done.")
 
 
@@ -219,12 +234,17 @@ if __name__ == "__main__":
 
     parser = ArgumentParser()
     parser.add_argument("--log-level", default="INFO")
-    parser.add_argument("--output-path", default=None)
+    parser.add_argument("--output-dir", default=None)
+    parser.add_argument("--temp_dir", default=None)
     parser.add_argument("--aozorabunko-repo-path", default=None)
     args = parser.parse_args()
 
-    if args.output_path is None:
-        args.output_path = os.environ["OUTPUT_PATH"]
+    if args.output_dir is None:
+        args.output_dir = os.environ["OUTPUT_DIR"]
+    if args.temp_dir is None:
+        args.temp_dir = os.environ.get(
+            "TEMP_DIR", os.path.join(gettempdir(), "aozolite")
+        )
     if args.aozorabunko_repo_path is None:
         args.aozorabunko_repo_path = os.environ["AOZORABUNKO_REPO_PATH"]
 
