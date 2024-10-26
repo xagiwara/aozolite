@@ -57,12 +57,12 @@ def main(aozorabunko_repo_path: str, output_dir: str, temp_dir: str, **kwargs):
     tmp_filepath = os.path.join(
         temp_dir,
         STYLE_VERSION,
-        f"{date.strftime("%Y%m%d-%H%M%S")}_{hash[:6]}.db",
+        f"{date.strftime("%Y%m%d-%H%M%S")}_{hash[:6]}.sqlite3",
     )
     output_filepath = os.path.join(
         output_dir,
         STYLE_VERSION,
-        f"{date.strftime("%Y%m%d-%H%M%S")}_{hash[:6]}.db",
+        f"{date.strftime("%Y%m%d-%H%M%S")}_{hash[:6]}.sqlite3",
     )
 
     if os.path.exists(output_filepath):
