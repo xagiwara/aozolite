@@ -164,9 +164,49 @@ def main(aozorabunko_repo_path: str, output_path: str, **kwargs):
 
     conn.commit()
 
-    conn.close()
-    logger.info("Vacuuming...")
+    logger.info("Claning up...")
+    c.execute(
+        """
+        SELECT book_texts.book_id, book_texts.revision FROM book_texts
+	        INNER JOIN books ON books.id = book_texts.book_id
+	        WHERE copyright_expired = 0 AND license IS NULL"""
+    )
+    remove_texts = c.fetchall()
+    c.executemany(
+        "DELETE FROM book_texts WHERE book_id = ? AND revision = ?", remove_texts
+    )
+    conn.commit()
+    logger.info(f"Removed {len(remove_texts)} texts")
 
+    c.execute(
+        """
+        SELECT books.id
+	        FROM book_texts
+	        RIGHT JOIN books ON books.id = book_texts.book_id
+	        WHERE book_id IS NULL"""
+    )
+    remove_books = [x for x, in c.fetchall()]
+    c.executemany(
+        "DELETE FROM book_authors WHERE book_id = ?", [(x,) for x in remove_books]
+    )
+    c.executemany("DELETE FROM books WHERE id = ?", [(x,) for x in remove_books])
+    conn.commit()
+    logger.info(f"Removed {len(remove_books)} books")
+
+    c.execute(
+        """
+        SELECT authors.id
+            FROM book_authors
+            RIGHT JOIN authors ON authors.id = book_authors.author_id
+            WHERE book_authors.id IS NULL"""
+    )
+    remove_authors = [x for x, in c.fetchall()]
+    c.executemany("DELETE FROM authors WHERE id = ?", [(x,) for x in remove_authors])
+    conn.commit()
+    logger.info(f"Removed {len(remove_authors)} authors")
+    conn.close()
+
+    logger.info("Vacuuming...")
     conn = sqlite3.connect(output_path, autocommit=True)
     conn.executescript("VACUUM")
     conn.close()
