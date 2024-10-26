@@ -1,12 +1,19 @@
 from bs4 import BeautifulSoup
-import unicodedata
 from typing import Literal, NamedTuple
 import copy
+from normalizers import normalize_text
+import re
+import os
+from logging import getLogger
+import sqlite3
+
+logger = getLogger(__name__)
+logger.setLevel("INFO")
 
 # パーサof図書
 
 
-class BookData(NamedTuple):
+class BookTextData(NamedTuple):
     body_raw: str
     body_text_rb_major: str
     body_text_rt_major: str
@@ -15,20 +22,22 @@ class BookData(NamedTuple):
     license: str | None
 
 
+unicode_pattern = re.compile(r"U\+([0-9A-F]+)")
+
+
 def extract_text(main_text: BeautifulSoup, major: Literal["rb", "rt"]) -> str:
     main_text = copy.deepcopy(main_text)
-
-    replace_texts = {
-        "※": "\uFFFD",  # U+FFFD: REPLACEMENT CHARACTER
-        "／＼": "\u3031",  # U+3031: VERTICAL KANA REPEAT MARK
-        "／″＼": "\u3032",  # U+3032: VERTICAL KANA REPEAT WITH VOICED SOUND MARK
-    }
 
     for ruby in main_text.find_all("ruby"):
         ruby.replace_with(ruby.find(major).text)
 
     for gaiji in main_text.find_all("img", class_="gaiji"):
-        gaiji.replace_with("\uFFFD")
+        alt: str = gaiji.attrs["alt"]
+        unicode_match = re.search(unicode_pattern, alt)
+        if unicode_match:
+            gaiji.replace_with(chr(int(unicode_match.group(1), 16)))
+        else:
+            gaiji.replace_with("\uFFFD")
 
     for img in main_text.find_all("img"):
         img.replace_with("")
@@ -43,14 +52,7 @@ def extract_text(main_text: BeautifulSoup, major: Literal["rb", "rt"]) -> str:
         br.replace_with("\n")
 
     text = main_text.get_text()
-    text = unicodedata.normalize("NFC", text)
-
-    for key, replace in replace_texts.items():
-        text = text.replace(key, replace)
-
-    text = "\n".join([x.strip() for x in text.split("\n") if x.strip() != ""])
-    text = unicodedata.normalize("NFKC", text)
-    return text
+    return normalize_text(text)
 
 
 def extract_colophon(soup: BeautifulSoup) -> tuple[str, str]:
@@ -92,7 +94,7 @@ def parse_book(path: str):
     colophon_raw, colophon_text = extract_colophon(soup)
     license = extract_license(soup)
 
-    return BookData(
+    return BookTextData(
         body_raw=body_raw,
         body_text_rb_major=body_text_rb_major,
         body_text_rt_major=body_text_rt_major,
@@ -100,3 +102,47 @@ def parse_book(path: str):
         colophon_text=colophon_text,
         license=license,
     )
+
+
+book_file_pattern = re.compile(r"^.*/([0-9]{6})/files/([0-9]+)_([0-9]+)\.html$")
+
+
+def find_files(repo_path: str):
+    html_files: list[(int, int, int)] = []
+    for root, _, files in os.walk(os.path.join(repo_path, "cards")):
+        if os.path.basename(root) != "files":
+            continue
+        for file in [os.path.join(root, x) for x in files]:
+            m = book_file_pattern.search(file.replace("\\", "/"))
+            if m is None:
+                continue
+
+            html_files += [(int(m.group(1)), int(m.group(2)), int(m.group(3)))]
+    return html_files
+
+
+def create_tables(conn: sqlite3.Connection):
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS book_texts (
+            book_id INTEGER NOT NULL,
+            revision INTEGER NOT NULL,
+            body_raw BLOB NOT NULL,
+            body_text_rb_major TEXT NOT NULL,
+            body_text_rt_major TEXT NOT NULL,
+            colophon_raw BLOB NOT NULL,
+            colophon_text TEXT NOT NULL,
+            license TEXT,
+            FOREIGN KEY (book_id) REFERENCES books(id),
+            UNIQUE (book_id, revision)
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_book_texts_book_id ON book_texts(book_id)"
+    )
+
+
+if __name__ == "__main__":
+    html_files = find_files(os.environ["AOZORABUNKO_REPO_PATH"])
+    print(f"found {len(html_files)} files")

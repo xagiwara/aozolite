@@ -12,11 +12,9 @@ git clone --filter=tree:0 https://github.com/aozorabunko/aozorabunko.git
 
 ディレクトリを環境変数 `AOZORABUNKO_REPO_PATH` で指定
 
-出力先は環境変数 `OUTPUT_PATH` で指定
-
-TODO: `argparse` 使いたい
+出力先ディレクトリは環境変数 `OUTPUT_DIR` で指定
 
 ## 備考
 
-- CC ライセンス（著作権有効）かつ、ND（改変禁止）を含む場合はスキップする
-- CC ライセンス（著作権有効）かつ、SA（継承）を含む場合はスキップする
+- 著作権なしフラグのあるものを収録する
+- 著作権ありフラグがあり、CC ライセンスかつ、ND（改変禁止）も SA（継承）も含まないものを収録する

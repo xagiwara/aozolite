@@ -3,16 +3,32 @@ import os
 from tqdm import tqdm
 from typing import NamedTuple
 import zlib
-from card_parser import parse_card
-from book_parser import parse_book
 import subprocess
 from datetime import datetime, timezone
-from normalizers import normalize_reading
+from logging import getLogger
+from tqdm.contrib.logging import logging_redirect_tqdm
+from tempfile import gettempdir
+from authors import (
+    load_authors,
+    create_tables as create_authors_table,
+    write_rows as write_authors,
+)
+from books import (
+    load_books,
+    create_tables as create_books_table,
+    write_rows as write_books,
+)
+from book_texts import (
+    parse_book,
+    find_files as find_book_files,
+    create_tables as create_book_texts_table,
+)
+import shutil
 
-AOZORABUNKO_REPO_PATH = os.environ["AOZORABUNKO_REPO_PATH"]
-OUTPUT_PATH = os.environ["OUTPUT_PATH"]
 
-STYLE_VERSION = "1.0.0"
+STYLE_VERSION = "2.0.0"
+
+logger = getLogger(__name__)
 
 
 class BookMetadata(NamedTuple):
@@ -24,337 +40,220 @@ class BookMetadata(NamedTuple):
     translator: str | None
 
 
-def main():
-    os.makedirs(os.path.dirname(OUTPUT_PATH), exist_ok=True)
+def main(aozorabunko_repo_path: str, output_dir: str, temp_dir: str, **kwargs):
+    kwargs
 
-    conn = sqlite3.connect(OUTPUT_PATH, autocommit=False)
-    c = conn.cursor()
-    c.execute("DROP TABLE IF EXISTS metadata")
-    c.execute(
-        "CREATE TABLE IF NOT EXISTS metadata ("
-        "style TEXT NOT NULL,"
-        "commit_hash TEXT NOT NULL,"
-        "date TEXT NOT NULL)"
-    )
-    c.execute(
-        "CREATE TABLE IF NOT EXISTS anthologies (id INTEGER PRIMARY KEY, name TEXT UNIQUE, reading TEXT)"
-    )
-    c.execute(
-        "CREATE TABLE IF NOT EXISTS authors ("
-        "id INTEGER PRIMARY KEY,"
-        "aozora_id INTEGER NOT NULL UNIQUE,"
-        "name TEXT NOT NULL,"
-        "name_reading TEXT NOT NULL,"
-        "name_key TEXT NOT NULL,"
-        "name_roman TEXT NOT NULL,"
-        "birth TEXT,"
-        "death TEXT)"
-    )
-    c.execute("CREATE INDEX IF NOT EXISTS idx_authors_name ON authors (name)")
-    c.execute(
-        "CREATE INDEX IF NOT EXISTS idx_authors_name_reading ON authors (name_reading)"
-    )
-    c.execute("CREATE INDEX IF NOT EXISTS idx_authors_name_key ON authors (name_key)")
-    c.execute(
-        "CREATE INDEX IF NOT EXISTS idx_authors_name_roman ON authors (name_roman)"
-    )
-
-    c.execute(
-        "CREATE TABLE IF NOT EXISTS styles (id INTEGER PRIMARY KEY, name TEXT UNIQUE)"
-    )
-
-    c.execute(
-        "CREATE TABLE IF NOT EXISTS cards ("
-        "id INTEGER PRIMARY KEY,"
-        "major_key INTEGER NOT NULL UNIQUE,"
-        "title TEXT NOT NULL,"
-        "title_reading TEXT NOT NULL,"
-        "title_key TEXT NOT NULL,"
-        "subtitle TEXT,"
-        "subtitle_reading TEXT,"
-        "subtitle_key TEXT,"
-        "original_title TEXT,"
-        "anthology_id INTEGER,"
-        "author_id INTEGER,"
-        "style_id INTEGER NOT NULL,"
-        "note TEXT,"
-        "first TEXT,"
-        "FOREIGN KEY(anthology_id) REFERENCES anthologies(id),"
-        "FOREIGN KEY(author_id) REFERENCES authors(id),"
-        "FOREIGN KEY(style_id) REFERENCES styles(id))",
-    )
-
-    c.execute("CREATE INDEX IF NOT EXISTS idx_cards_title ON cards (title)")
-    c.execute(
-        "CREATE INDEX IF NOT EXISTS idx_cards_title_reading ON cards (title_reading)"
-    )
-    c.execute("CREATE INDEX IF NOT EXISTS idx_cards_title_key ON cards (title_key)")
-    c.execute("CREATE INDEX IF NOT EXISTS idx_cards_subtitle ON cards (subtitle)")
-    c.execute(
-        "CREATE INDEX IF NOT EXISTS idx_cards_subtitle_reading ON cards (subtitle_reading)"
-    )
-    c.execute(
-        "CREATE INDEX IF NOT EXISTS idx_cards_subtitle_key ON cards (subtitle_key)"
-    )
-    c.execute(
-        "CREATE INDEX IF NOT EXISTS idx_cards_original_title ON cards (original_title)"
-    )
-    c.execute(
-        "CREATE INDEX IF NOT EXISTS idx_cards_anthology_id ON cards (anthology_id)"
-    )
-    c.execute("CREATE INDEX IF NOT EXISTS idx_cards_style_id ON cards (style_id)")
-
-    c.execute(
-        "CREATE TABLE IF NOT EXISTS card_categories ("
-        "id INTEGER PRIMARY KEY,"
-        "card_id INTEGER NOT NULL,"
-        "category INTEGER NOT NULL,"
-        "UNIQUE(card_id, category),"
-        "FOREIGN KEY(card_id) REFERENCES cards(id))"
-    )
-
-    c.execute(
-        "CREATE TABLE IF NOT EXISTS card_authors ("
-        "id INTEGER PRIMARY KEY,"
-        "card_id INTEGER NOT NULL,"
-        "author_id INTEGER NOT NULL,"
-        "type TEXT NOT NULL,"
-        "UNIQUE(card_id, author_id, type),"
-        "FOREIGN KEY(card_id) REFERENCES cards(id),"
-        "FOREIGN KEY(author_id) REFERENCES authors(id))"
-    )
-    c.execute(
-        "CREATE INDEX IF NOT EXISTS idx_card_authors_card_id ON card_authors (card_id)"
-    )
-    c.execute(
-        "CREATE INDEX IF NOT EXISTS idx_card_authors_author_id ON card_authors (author_id)"
-    )
-
-    c.execute(
-        "CREATE TABLE IF NOT EXISTS books ("
-        "id INTEGER PRIMARY KEY,"
-        "card_id INTEGER NOT NULL,"
-        "minor_key INTEGER NOT NULL,"
-        "body_raw BLOB NOT NULL,"
-        "body_text_rb_major TEXT NOT NULL,"
-        "body_text_rt_major TEXT NOT NULL,"
-        "colophon_raw BLOB NOT NULL,"
-        "colophon_text TEXT NOT NULL,"
-        "license TEXT,"
-        "UNIQUE(card_id, minor_key),"
-        "FOREIGN KEY(card_id) REFERENCES cards(id))"
-    )
-    c.execute("CREATE INDEX IF NOT EXISTS idx_books_card_id ON books (card_id)")
-    c.execute("CREATE INDEX IF NOT EXISTS idx_books_minor_key ON books (minor_key)")
-
-    tqdm.write(f"searching for book files in {AOZORABUNKO_REPO_PATH}")
-
-    html_files: list[str] = []
-    for root, dirs, files in os.walk(os.path.join(AOZORABUNKO_REPO_PATH, "cards")):
-        if os.path.basename(root) != "files":
-            continue
-        for file in files:
-            if file.endswith(".html") and "_" in file:
-                html_files += [os.path.join(root, file)]
-    tqdm.write(f"found {len(html_files)} files")
-    html_files.sort()
-
-    try:
-        for file_idx, filename in enumerate(tqdm(html_files)):
-            try:
-                author_key = int(
-                    os.path.basename(os.path.dirname(os.path.dirname(filename)))
-                )
-                major_key, minor_key = [
-                    int(x)
-                    for x in os.path.splitext(os.path.basename(filename))[0].split("_")
-                ]
-            except Exception as e:
-                continue
-
-            c.execute("SELECT id FROM cards WHERE major_key = ?", (major_key,))
-            card_id_ = c.fetchone()
-            if card_id_:
-                (card_id,) = card_id_
-            else:
-                card_info = parse_card(
-                    os.path.join(
-                        AOZORABUNKO_REPO_PATH,
-                        "cards",
-                        f"{author_key:06}",
-                        f"card{major_key}.html",
-                    )
-                )
-
-                if card_info.title.anthology:
-                    c.execute(
-                        "INSERT OR IGNORE INTO anthologies (name, reading) VALUES (?, ?)",
-                        (card_info.title.anthology, card_info.title.anthology_reading),
-                    )
-                    c.execute(
-                        "SELECT id FROM anthologies WHERE name = ?",
-                        (card_info.title.anthology,),
-                    )
-                    (anthology_id,) = c.fetchone()
-                else:
-                    anthology_id = None
-
-                c.execute(
-                    "INSERT OR IGNORE INTO styles (name) VALUES (?)",
-                    (card_info.info.style,),
-                )
-                c.execute(
-                    "SELECT id FROM styles WHERE name = ?", (card_info.info.style,)
-                )
-                (style_id,) = c.fetchone()
-
-                for author in card_info.authors:
-                    c.execute(
-                        "INSERT OR IGNORE INTO authors (aozora_id, name, name_reading, name_key, name_roman, birth, death) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                        (
-                            author.aozora_id,
-                            author.name,
-                            author.name_reading,
-                            normalize_reading(author.name_reading),
-                            author.name_roman,
-                            author.birth,
-                            author.death,
-                        ),
-                    )
-
-                c.execute(
-                    "SELECT id FROM authors WHERE aozora_id = ?",
-                    (card_info.title.author,),
-                )
-                (author_id,) = c.fetchone()
-
-                c.execute(
-                    "INSERT INTO cards"
-                    "(major_key, title, title_reading, title_key, subtitle, subtitle_reading, subtitle_key, original_title, anthology_id, author_id, style_id, note, first)"
-                    "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-                    "RETURNING id",
-                    (
-                        major_key,
-                        card_info.title.title,
-                        card_info.title.title_reading,
-                        normalize_reading(card_info.title.title_reading),
-                        card_info.title.subtitle,
-                        card_info.title.subtitle_reading,
-                        (
-                            normalize_reading(card_info.title.subtitle_reading)
-                            if card_info.title.subtitle_reading
-                            else None
-                        ),
-                        card_info.title.original_title,
-                        anthology_id,
-                        author_id,
-                        style_id,
-                        card_info.info.note,
-                        card_info.info.first,
-                    ),
-                )
-                (card_id,) = c.fetchone()
-
-                for category in card_info.info.categories:
-                    c.execute(
-                        "INSERT OR IGNORE INTO card_categories (card_id, category) VALUES (?, ?)",
-                        (card_id, category),
-                    )
-
-                for author in card_info.authors:
-                    c.execute(
-                        "SELECT id FROM authors WHERE aozora_id = ?",
-                        (author.aozora_id,),
-                    )
-                    (author_id,) = c.fetchone()
-
-                    c.execute(
-                        "INSERT INTO card_authors (card_id, author_id, type) VALUES (?, ?, ?)",
-                        (card_id, author_id, author.type),
-                    )
-
-            c.execute(
-                "SELECT EXISTS(SELECT * FROM books WHERE card_id = ? AND minor_key = ?)",
-                (card_id, minor_key),
-            )
-            (exists,) = c.fetchone()
-            if exists:
-                continue
-
-            try:
-                book_info = parse_book(
-                    os.path.join(
-                        AOZORABUNKO_REPO_PATH,
-                        "cards",
-                        f"{author_key:06}",
-                        "files",
-                        f"{major_key}_{minor_key}.html",
-                    )
-                )
-                if book_info is None:
-                    continue
-
-                # CC ライセンスに ND もしくは SA を含むならスキップ
-                if book_info.license is not None:
-                    cc = [x.lower() for x in book_info.license.split("/")[4].split("-")]
-                    if "nd" in cc or "sa" in cc:
-                        tqdm.write(f"skipped: {filename} (reason: CC {cc})")
-                        continue
-            except Exception as e:
-                tqdm.write(f"skipped: {filename}")
-                tqdm.write(f"{e}")
-                continue
-
-            c.execute(
-                "INSERT INTO books "
-                "(card_id, minor_key, body_raw, body_text_rb_major, body_text_rt_major, colophon_raw, colophon_text, license) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (
-                    card_id,
-                    minor_key,
-                    zlib.compress(book_info.body_raw.encode("utf-8")),
-                    book_info.body_text_rb_major,
-                    book_info.body_text_rt_major,
-                    zlib.compress(book_info.colophon_raw.encode("utf-8")),
-                    book_info.colophon_text,
-                    book_info.license,
-                ),
-            )
-
-            if file_idx > 0 and file_idx % 100 == 0:
-                conn.commit()
-    except Exception as e:
-        print(filename)
-        raise e
-
-    conn.commit()
-
-    # metadata
+    # read metadata
     proc = subprocess.run(
         ["git", "log", "-1", "--pretty=format:%ci\t%H"],
         capture_output=True,
-        cwd=AOZORABUNKO_REPO_PATH,
+        cwd=aozorabunko_repo_path,
         encoding="utf-8",
     )
     date, hash = proc.stdout.strip().split("\t")
 
     date = datetime.strptime(date, "%Y-%m-%d %H:%M:%S %z")
     date = date.astimezone(timezone.utc)
+    tmp_filepath = os.path.join(
+        temp_dir,
+        STYLE_VERSION,
+        f"{date.strftime("%Y%m%d-%H%M%S")}_{hash[:6]}.sqlite3",
+    )
+    output_filepath = os.path.join(
+        output_dir,
+        STYLE_VERSION,
+        f"{date.strftime("%Y%m%d-%H%M%S")}_{hash[:6]}.sqlite3",
+    )
+
+    if os.path.exists(output_filepath):
+        logger.info(f"already exists: {tmp_filepath}")
+        return
+
+    os.makedirs(os.path.dirname(tmp_filepath), exist_ok=True)
+    conn = sqlite3.connect(tmp_filepath, autocommit=False)
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS metadata ("
+        "style TEXT NOT NULL,"
+        "commit_hash TEXT NOT NULL,"
+        "date TEXT NOT NULL)"
+    )
+    create_authors_table(conn)
+    create_books_table(conn)
+    create_book_texts_table(conn)
+
+    c = conn.cursor()
+
+    # metadata
+    c.execute("DELETE FROM metadata")
     c.execute(
         "INSERT INTO metadata (style, commit_hash, date) VALUES (?, ?, ?)",
         (STYLE_VERSION, hash, date.strftime("%Y-%m-%d %H:%M:%S %z")),
     )
     conn.commit()
+
+    # authors
+    logger.info("loading authors...")
+    authors = load_authors(aozorabunko_repo_path)
+    authors.sort(key=lambda x: x.id)
+    logger.info(f"loaded {len(authors)} authors")
+    logger.info("writing authors...")
+    write_authors(conn, authors)
+    logger.info("done: writing authors")
+
+    # books
+    logger.info("loading books...")
+    books = load_books(aozorabunko_repo_path)
+    books.sort(key=lambda x: x.id)
+    logger.info(f"loaded {len(books)} books")
+    logger.info("writing books...")
+    write_books(conn, books)
+    logger.info("done: writing books")
+
+    # book texts
+    logger.info("finding book files...")
+    book_files = find_book_files(aozorabunko_repo_path)
+    logger.info(f"found {len(book_files)} files")
+    logger.info("writing book texts...")
+    try:
+        for i, (author_id, book_id, version_id) in enumerate(tqdm(book_files)):
+            c.execute(
+                "SELECT EXISTS(SELECT 1 FROM book_texts WHERE book_id = ? AND revision = ?)",
+                (book_id, version_id),
+            )
+            (exists,) = c.fetchone()
+            if exists:
+                continue
+
+            if i % 100 == 0:
+                conn.commit()
+
+            book_filepath = os.path.join(
+                aozorabunko_repo_path,
+                "cards",
+                f"{author_id:06}",
+                "files",
+                f"{book_id}_{version_id}.html",
+            )
+            try:
+                book = parse_book(book_filepath)
+
+                if book is None:
+                    logger.info(f"skipped: {book_filepath} (reason: body not found)")
+                    continue
+
+                # CC ライセンスに ND もしくは SA を含むならスキップ
+                if book.license is not None:
+                    cc = [x.lower() for x in book.license.split("/")[4].split("-")]
+                    if "nd" in cc or "sa" in cc:
+                        logger.info(f"skipped: {book_filepath} (reason: CC {cc})")
+                        continue
+
+                c.execute(
+                    "INSERT INTO book_texts (book_id, revision, body_raw, body_text_rb_major, body_text_rt_major, colophon_raw, colophon_text, license) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        book_id,
+                        version_id,
+                        zlib.compress(book.body_raw.encode("utf-8")),
+                        book.body_text_rb_major,
+                        book.body_text_rt_major,
+                        zlib.compress(book.colophon_raw.encode("utf-8")),
+                        book.colophon_text,
+                        book.license,
+                    ),
+                )
+            except Exception as e:
+                logger.error(f"skipped: {book_filepath}")
+                logger.error(e)
+                continue
+
+    except Exception as e:
+        logger.error(
+            os.path.join(
+                aozorabunko_repo_path,
+                "cards",
+                f"{author_id:06}",
+                "files",
+                f"{book_id}_{version_id}.html",
+            )
+        )
+        raise e
+
+    conn.commit()
+
+    logger.info("Claning up...")
+    c.execute(
+        """
+        SELECT book_texts.book_id, book_texts.revision FROM book_texts
+	        INNER JOIN books ON books.id = book_texts.book_id
+	        WHERE copyright_expired = 0 AND license IS NULL"""
+    )
+    remove_texts = c.fetchall()
+    c.executemany(
+        "DELETE FROM book_texts WHERE book_id = ? AND revision = ?", remove_texts
+    )
+    conn.commit()
+    logger.info(f"Removed {len(remove_texts)} texts")
+
+    c.execute(
+        """
+        SELECT books.id
+	        FROM book_texts
+	        RIGHT JOIN books ON books.id = book_texts.book_id
+	        WHERE book_id IS NULL"""
+    )
+    remove_books = [x for x, in c.fetchall()]
+    c.executemany(
+        "DELETE FROM book_authors WHERE book_id = ?", [(x,) for x in remove_books]
+    )
+    c.executemany("DELETE FROM books WHERE id = ?", [(x,) for x in remove_books])
+    conn.commit()
+    logger.info(f"Removed {len(remove_books)} books")
+
+    c.execute(
+        """
+        SELECT authors.id
+            FROM book_authors
+            RIGHT JOIN authors ON authors.id = book_authors.author_id
+            WHERE book_authors.id IS NULL"""
+    )
+    remove_authors = [x for x, in c.fetchall()]
+    c.executemany("DELETE FROM authors WHERE id = ?", [(x,) for x in remove_authors])
+    conn.commit()
+    logger.info(f"Removed {len(remove_authors)} authors")
     conn.close()
 
-    print("Vacuuming...")
-
-    conn = sqlite3.connect(OUTPUT_PATH, autocommit=True)
+    logger.info("Vacuuming...")
+    conn = sqlite3.connect(tmp_filepath, autocommit=True)
     conn.executescript("VACUUM")
     conn.close()
 
-    print("Done.")
+    logger.info("Moving...")
+    os.makedirs(os.path.dirname(output_filepath), exist_ok=True)
+    shutil.move(tmp_filepath, output_filepath)
+    shutil.rmtree(os.path.dirname(tmp_filepath))
+    logger.info("Done.")
 
 
 if __name__ == "__main__":
-    main()
+    from argparse import ArgumentParser
+
+    parser = ArgumentParser()
+    parser.add_argument("--log-level", default="INFO")
+    parser.add_argument("--output-dir", default=None)
+    parser.add_argument("--temp_dir", default=None)
+    parser.add_argument("--aozorabunko-repo-path", default=None)
+    args = parser.parse_args()
+
+    if args.output_dir is None:
+        args.output_dir = os.environ["OUTPUT_DIR"]
+    if args.temp_dir is None:
+        args.temp_dir = os.environ.get(
+            "TEMP_DIR", os.path.join(gettempdir(), "aozolite")
+        )
+    if args.aozorabunko_repo_path is None:
+        args.aozorabunko_repo_path = os.environ["AOZORABUNKO_REPO_PATH"]
+
+    logger.setLevel(args.log_level.upper())
+    with logging_redirect_tqdm(loggers=[logger]):
+        main(**vars(args))

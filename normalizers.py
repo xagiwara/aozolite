@@ -38,3 +38,18 @@ def normalize_reading(text: str) -> str:
         unicodedata.normalize("NFKD", text).replace("\u3099", "").replace("\u309a", "")
     )
     return unicodedata.normalize("NFKC", text)
+
+
+def normalize_text(text: str):
+    replace_texts = {
+        "※": "\uFFFD",  # U+FFFD: REPLACEMENT CHARACTER
+        "／＼": "\u3031",  # U+3031: VERTICAL KANA REPEAT MARK
+        "／″＼": "\u3032",  # U+3032: VERTICAL KANA REPEAT WITH VOICED SOUND MARK
+    }
+
+    text = unicodedata.normalize("NFC", text)
+    for key, replace in replace_texts.items():
+        text = text.replace(key, replace)
+
+    text = "\n".join([x.strip() for x in text.split("\n") if x.strip() != ""])
+    return text
