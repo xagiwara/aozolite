@@ -12,7 +12,7 @@ git clone --filter=tree:0 https://github.com/aozorabunko/aozorabunko.git
 
 ディレクトリを環境変数 `AOZORABUNKO_REPO_PATH` で指定
 
-出力先は環境変数 `OUTPUT_PATH` で指定
+出力先ディレクトリは環境変数 `OUTPUT_DIR` で指定
 
 ## 備考
 
