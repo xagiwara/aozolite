@@ -21,6 +21,6 @@ COPY --from=install-requirements /usr/local/lib/python3.12/site-packages /usr/lo
 
 WORKDIR /app
 
-ADD ./*.py /app
+ADD ./*.py /app/
 
 CMD [ "python", "build.py" ]
