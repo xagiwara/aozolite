@@ -22,8 +22,11 @@ from book_texts import (
     parse_book,
     find_files as find_book_files,
     create_tables as create_book_texts_table,
+    BookTextData,
 )
 import shutil
+import multiprocessing as mp
+from multiprocessing.pool import AsyncResult
 
 
 STYLE_VERSION = "2.0.0"
@@ -40,7 +43,9 @@ class BookMetadata(NamedTuple):
     translator: str | None
 
 
-def main(aozorabunko_repo_path: str, output_dir: str, temp_dir: str, **kwargs):
+def main(
+    aozorabunko_repo_path: str, output_dir: str, temp_dir: str, procs: int, **kwargs
+):
     kwargs
 
     # read metadata
@@ -112,74 +117,82 @@ def main(aozorabunko_repo_path: str, output_dir: str, temp_dir: str, **kwargs):
     # book texts
     logger.info("finding book files...")
     book_files = find_book_files(aozorabunko_repo_path)
-    logger.info(f"found {len(book_files)} files")
-    logger.info("writing book texts...")
-    try:
-        for i, (author_id, book_id, version_id) in enumerate(tqdm(book_files)):
-            c.execute(
-                "SELECT EXISTS(SELECT 1 FROM book_texts WHERE book_id = ? AND revision = ?)",
-                (book_id, version_id),
-            )
-            (exists,) = c.fetchone()
-            if exists:
-                continue
+    total_book_files = len(book_files)
 
-            if i % 100 == 0:
-                conn.commit()
-
-            book_filepath = os.path.join(
-                aozorabunko_repo_path,
-                "cards",
-                f"{author_id:06}",
-                "files",
-                f"{book_id}_{version_id}.html",
-            )
-            try:
-                book = parse_book(book_filepath)
-
-                if book is None:
-                    logger.info(f"skipped: {book_filepath} (reason: body not found)")
-                    continue
-
-                # CC ライセンスに ND もしくは SA を含むならスキップ
-                if book.license is not None:
-                    cc = [x.lower() for x in book.license.split("/")[4].split("-")]
-                    if "nd" in cc or "sa" in cc:
-                        logger.info(f"skipped: {book_filepath} (reason: CC {cc})")
-                        continue
-
-                c.execute(
-                    "INSERT INTO book_texts (book_id, revision, body_raw, body_text_rb_major, body_text_rt_major, colophon_raw, colophon_text, license) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                    (
-                        book_id,
-                        version_id,
-                        zlib.compress(book.body_raw.encode("utf-8")),
-                        book.body_text_rb_major,
-                        book.body_text_rt_major,
-                        zlib.compress(book.colophon_raw.encode("utf-8")),
-                        book.colophon_text,
-                        book.license,
-                    ),
-                )
-            except Exception as e:
-                logger.error(f"skipped: {book_filepath}")
-                logger.error(e)
-                continue
-
-    except Exception as e:
-        logger.error(
+    logger.info(f"found {total_book_files} files")
+    c.execute("SELECT book_id, revision FROM book_texts")
+    processed_texts: list[tuple[int, int]] = c.fetchall()
+    logger.info(f"found {len(processed_texts)} processed texts")
+    book_files = [
+        (
+            author_id,
+            book_id,
+            version_id,
             os.path.join(
-                aozorabunko_repo_path,
-                "cards",
-                f"{author_id:06}",
-                "files",
-                f"{book_id}_{version_id}.html",
-            )
+                "cards", f"{author_id:06}", "files", f"{book_id}_{version_id}.html"
+            ),
         )
-        raise e
+        for (author_id, book_id, version_id) in book_files
+        if (book_id, version_id) not in processed_texts
+    ]
+    logger.info(f"found {len(book_files)} new files")
+    tasks: dict[int, AsyncResult] = {}
 
-    conn.commit()
+    logger.info("writing book texts...")
+    with mp.Pool(procs - 1) as pool:
+        for i, (_, book_id, version_id, filepath) in enumerate(book_files):
+            tasks[i] = pool.apply_async(
+                func=parse_book, args=(os.path.join(aozorabunko_repo_path, filepath),)
+            )
+
+        with tqdm(total=total_book_files, initial=len(processed_texts)) as pbar:
+            while len(tasks) > 0:
+                for i in list(tasks.keys()):
+                    if tasks[i].ready():
+                        try:
+                            (_, book_id, version_id, book_filepath) = book_files[i]
+
+                            book: BookTextData | None = tasks[i].get()
+                            if book is None:
+                                logger.info(
+                                    f"skipped: {book_filepath} (reason: body not found)"
+                                )
+                                continue
+
+                            # CC ライセンスに ND もしくは SA を含むならスキップ
+                            if book.license is not None:
+                                cc = [
+                                    x.lower()
+                                    for x in book.license.split("/")[4].split("-")
+                                ]
+                                if "nd" in cc or "sa" in cc:
+                                    logger.info(
+                                        f"skipped: {book_filepath} (reason: CC {cc})"
+                                    )
+                                    continue
+
+                            c.execute(
+                                "INSERT INTO book_texts (book_id, revision, body_raw, body_text_rb_major, body_text_rt_major, colophon_raw, colophon_text, license) "
+                                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                                (
+                                    book_id,
+                                    version_id,
+                                    zlib.compress(book.body_raw.encode("utf-8")),
+                                    book.body_text_rb_major,
+                                    book.body_text_rt_major,
+                                    zlib.compress(book.colophon_raw.encode("utf-8")),
+                                    book.colophon_text,
+                                    book.license,
+                                ),
+                            )
+                            conn.commit()
+                        except Exception as e:
+                            logger.error(f"skipped: {book_filepath}")
+                            logger.error(e)
+                            continue
+                        finally:
+                            pbar.update(1)
+                            del tasks[i]
 
     logger.info("Claning up...")
     c.execute(
@@ -240,20 +253,28 @@ if __name__ == "__main__":
 
     parser = ArgumentParser()
     parser.add_argument("--log-level", default="INFO")
-    parser.add_argument("--output-dir", default=None)
-    parser.add_argument("--temp_dir", default=None)
-    parser.add_argument("--aozorabunko-repo-path", default=None)
+    parser.add_argument(
+        "--output-dir",
+        default=os.environ.get("OUTPUT_DIR"),
+        required=not os.environ.get("OUTPUT_DIR"),
+    )
+    parser.add_argument(
+        "--temp_dir",
+        default=os.environ.get("TEMP_DIR", os.path.join(gettempdir(), "aozolite")),
+    )
+    parser.add_argument(
+        "--aozorabunko-repo-path",
+        default=os.environ.get("AOZORABUNKO_REPO_PATH"),
+        required=not os.environ.get("AOZORABUNKO_REPO_PATH"),
+    )
+    parser.add_argument(
+        "--procs",
+        type=int,
+        default=os.environ.get("PROCS", (os.cpu_count() or 1) + 1),
+    )
     args = parser.parse_args()
-
-    if args.output_dir is None:
-        args.output_dir = os.environ["OUTPUT_DIR"]
-    if args.temp_dir is None:
-        args.temp_dir = os.environ.get(
-            "TEMP_DIR", os.path.join(gettempdir(), "aozolite")
-        )
-    if args.aozorabunko_repo_path is None:
-        args.aozorabunko_repo_path = os.environ["AOZORABUNKO_REPO_PATH"]
 
     logger.setLevel(args.log_level.upper())
     with logging_redirect_tqdm(loggers=[logger]):
+        logger.info(args)
         main(**vars(args))
