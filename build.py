@@ -29,7 +29,7 @@ import multiprocessing as mp
 from multiprocessing.pool import AsyncResult
 
 
-STYLE_VERSION = "2.0.0"
+STYLE_VERSION = "3.0.0-alpha.0"
 
 logger = getLogger(__name__)
 
@@ -41,6 +41,39 @@ class BookMetadata(NamedTuple):
     original_title: str | None
     subtitle: str | None
     translator: str | None
+
+
+class ProcessBookResult(NamedTuple):
+    data: BookTextData | None
+    author_id: int
+    book_id: int
+    version_id: int
+
+    @property
+    def filepath(self) -> int:
+        return os.path.join(
+            "cards",
+            f"{self.author_id:06}",
+            "files",
+            f"{self.book_id}_{self.version_id}.html",
+        )
+
+
+def process_book(
+    aozorabunko_repo_path: str, author_id: int, book_id: int, version_id: int
+):
+    filepath = os.path.join(
+        "cards",
+        f"{author_id:06}",
+        "files",
+        f"{book_id}_{version_id}.html",
+    )
+    return ProcessBookResult(
+        data=parse_book(os.path.join(aozorabunko_repo_path, filepath)),
+        author_id=author_id,
+        book_id=book_id,
+        version_id=version_id,
+    )
 
 
 def main(
@@ -124,35 +157,41 @@ def main(
     processed_texts: list[tuple[int, int]] = c.fetchall()
     logger.info(f"found {len(processed_texts)} processed texts")
     book_files = [
-        (
-            author_id,
-            book_id,
-            version_id,
-            os.path.join(
-                "cards", f"{author_id:06}", "files", f"{book_id}_{version_id}.html"
-            ),
-        )
+        (author_id, book_id, version_id)
         for (author_id, book_id, version_id) in book_files
         if (book_id, version_id) not in processed_texts
     ]
     logger.info(f"found {len(book_files)} new files")
-    tasks: dict[int, AsyncResult] = {}
+    tasks: list[AsyncResult] = []
+    tasks_metadata: dict[AsyncResult, tuple[int, int, int]] = {}
 
     logger.info("writing book texts...")
     with mp.Pool(procs - 1) as pool:
-        for i, (_, book_id, version_id, filepath) in enumerate(book_files):
-            tasks[i] = pool.apply_async(
-                func=parse_book, args=(os.path.join(aozorabunko_repo_path, filepath),)
+        for author_id, book_id, version_id in book_files:
+            tasks.append(
+                pool.apply_async(
+                    func=process_book,
+                    args=(aozorabunko_repo_path, author_id, book_id, version_id),
+                )
             )
+            tasks_metadata[tasks[-1]] = (author_id, book_id, version_id)
 
-        with tqdm(total=total_book_files, initial=len(processed_texts)) as pbar:
+        with tqdm(
+            total=total_book_files, initial=len(processed_texts), mininterval=1
+        ) as pbar:
             while len(tasks) > 0:
-                for i in list(tasks.keys()):
-                    if tasks[i].ready():
+                for task in list(tasks):
+                    if task.ready():
                         try:
-                            (_, book_id, version_id, book_filepath) = book_files[i]
+                            result: ProcessBookResult = task.get()
 
-                            book: BookTextData | None = tasks[i].get()
+                            (book, book_id, version_id, book_filepath) = (
+                                result.data,
+                                result.book_id,
+                                result.version_id,
+                                result.filepath,
+                            )
+
                             if book is None:
                                 logger.info(
                                     f"skipped: {book_filepath} (reason: body not found)"
@@ -172,27 +211,46 @@ def main(
                                     continue
 
                             c.execute(
-                                "INSERT INTO book_texts (book_id, revision, body_raw, body_text_rb_major, body_text_rt_major, colophon_raw, colophon_text, license) "
-                                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                                "INSERT INTO book_texts (book_id, revision, body_raw, colophon_raw, colophon_text, license) "
+                                "VALUES (?, ?, ?, ?, ?, ?)",
                                 (
                                     book_id,
                                     version_id,
                                     zlib.compress(book.body_raw.encode("utf-8")),
-                                    book.body_text_rb_major,
-                                    book.body_text_rt_major,
                                     zlib.compress(book.colophon_raw.encode("utf-8")),
                                     book.colophon_text,
                                     book.license,
                                 ),
                             )
+                            c.executemany(
+                                """
+                                INSERT INTO book_text_lines (book_id, revision, line_number, rb_major, rt_major) VALUES (?, ?, ?, ?, ?)
+                                """,
+                                [
+                                    (book_id, version_id, i + 1, rb, rt)
+                                    for i, (rb, rt) in enumerate(
+                                        zip(
+                                            book.body_text_rb_major.split("\n"),
+                                            book.body_text_rt_major.split("\n"),
+                                        )
+                                    )
+                                ],
+                            )
                             conn.commit()
                         except Exception as e:
-                            logger.error(f"skipped: {book_filepath}")
-                            logger.error(e)
-                            continue
+                            (author_id, book_id, version_id) = tasks_metadata[task]
+                            filepath = os.path.join(
+                                "cards",
+                                f"{author_id:06}",
+                                "files",
+                                f"{book_id}_{version_id}.html",
+                            )
+                            logger.error(f"skipped: {filepath} (reason: {e})")
+                            logger.error(e, stack_info=True)
                         finally:
+                            tasks.remove(task)
+                            del tasks_metadata[task]
                             pbar.update(1)
-                            del tasks[i]
 
     logger.info("Claning up...")
     c.execute(
