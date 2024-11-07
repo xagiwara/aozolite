@@ -29,7 +29,7 @@ import multiprocessing as mp
 from multiprocessing.pool import AsyncResult
 
 
-STYLE_VERSION = "2.0.0"
+STYLE_VERSION = "2.1.0-alpha.0"
 
 logger = getLogger(__name__)
 
@@ -172,14 +172,15 @@ def main(
                                     continue
 
                             c.execute(
-                                "INSERT INTO book_texts (book_id, revision, body_raw, body_text_rb_major, body_text_rt_major, colophon_raw, colophon_text, license) "
-                                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                                "INSERT INTO book_texts (book_id, revision, body_raw, body_text_rb_major, body_text_rt_major, line_count, colophon_raw, colophon_text, license) "
+                                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                                 (
                                     book_id,
                                     version_id,
                                     zlib.compress(book.body_raw.encode("utf-8")),
                                     book.body_text_rb_major,
                                     book.body_text_rt_major,
+                                    len(book.body_text_rb_major.split("\n")),
                                     zlib.compress(book.colophon_raw.encode("utf-8")),
                                     book.colophon_text,
                                     book.license,

@@ -135,6 +135,7 @@ def create_tables(conn: sqlite3.Connection):
             body_text_rt_major TEXT NOT NULL,
             colophon_raw BLOB NOT NULL,
             colophon_text TEXT NOT NULL,
+            line_count INTEGER NOT NULL,
             license TEXT,
             FOREIGN KEY (book_id) REFERENCES books(id),
             UNIQUE (book_id, revision)
