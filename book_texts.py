@@ -42,7 +42,7 @@ def extract_text(main_text: BeautifulSoup, major: Literal["rb", "rt"]) -> str:
     for img in main_text.find_all("img"):
         img.replace_with("")
 
-    for note in main_text.find_all("span", class_="notes"):
+    for note in main_text.find_all(class_="notes"):
         note.replace_with("")
 
     for br in main_text.find_all(string="\n"):
@@ -50,6 +50,9 @@ def extract_text(main_text: BeautifulSoup, major: Literal["rb", "rt"]) -> str:
 
     for br in main_text.find_all("br"):
         br.replace_with("\n")
+
+    for div in main_text.find_all("div"):
+        div.replace_with(f"\n{div.text}\n")
 
     text = main_text.get_text()
     return normalize_text(text)
