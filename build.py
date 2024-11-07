@@ -29,7 +29,7 @@ import multiprocessing as mp
 from multiprocessing.pool import AsyncResult
 
 
-STYLE_VERSION = "3.0.0-alpha.0"
+STYLE_VERSION = "3.0.0-alpha.1"
 
 logger = getLogger(__name__)
 
