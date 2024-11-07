@@ -29,7 +29,7 @@ import multiprocessing as mp
 from multiprocessing.pool import AsyncResult
 
 
-STYLE_VERSION = "2.1.0-alpha.0"
+STYLE_VERSION = "2.1.0-alpha.1"
 
 logger = getLogger(__name__)
 
@@ -180,7 +180,11 @@ def main(
                                     zlib.compress(book.body_raw.encode("utf-8")),
                                     book.body_text_rb_major,
                                     book.body_text_rt_major,
-                                    len(book.body_text_rb_major.split("\n")),
+                                    (
+                                        len(book.body_text_rb_major.split("\n"))
+                                        if book.body_text_rb_major != ""
+                                        else 0
+                                    ),
                                     zlib.compress(book.colophon_raw.encode("utf-8")),
                                     book.colophon_text,
                                     book.license,
