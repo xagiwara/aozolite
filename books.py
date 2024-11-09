@@ -31,6 +31,8 @@ class BookInfo(NamedTuple):
     style: str
     author_id: int
     authors: list[BookAuthor]
+    published_at: str
+    last_updated_at: str
 
 
 def load_books(repo_path: str):
@@ -65,6 +67,8 @@ def load_books(repo_path: str):
                             row["文字遣い種別"],
                             int(author_id_match.group(1)),
                             [],
+                            published_at=row["公開日"],
+                            last_updated_at=row["最終更新日"],
                         )
                     books[id].authors.append(
                         BookAuthor(int(row["人物ID"]), row["役割フラグ"])
@@ -91,6 +95,8 @@ def create_tables(conn: sqlite3.Connection):
             author_id INTEGER NOT NULL,
             copyright_expired BOOLEAN NOT NULL,
             style_id INTEGER NOT NULL,
+            published_at TEXT NOT NULL,
+            last_updated_at TEXT NOT NULL,
             FOREIGN KEY (style_id) REFERENCES styles (id)
         )
         """
@@ -161,8 +167,8 @@ def write_rows(conn: sqlite3.Connection, books: list[BookInfo]):
         ),
     )
     conn.executemany(
-        "INSERT OR REPLACE INTO books (id, title, title_reading, title_key, subtitle, subtitle_reading, original_title, first, copyright_expired, author_id, style_id) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, (SELECT id FROM styles WHERE style = ?))",
+        "INSERT OR REPLACE INTO books (id, title, title_reading, title_key, subtitle, subtitle_reading, original_title, first, copyright_expired, author_id, style_id, published_at, last_updated_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, (SELECT id FROM styles WHERE style = ?), ?, ?)",
         (
             (
                 book.id,
@@ -176,6 +182,8 @@ def write_rows(conn: sqlite3.Connection, books: list[BookInfo]):
                 book.copyright_expired,
                 book.author_id,
                 book.style,
+                book.published_at,
+                book.last_updated_at,
             )
             for book in books
         ),

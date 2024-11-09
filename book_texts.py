@@ -147,7 +147,7 @@ def create_tables(conn: sqlite3.Connection):
     )
     conn.execute(
         """
-        CREATE VIEW latest_book_texts AS SELECT book_texts.*, books.title, books.title_reading, books.title_key, books.subtitle, books.subtitle_reading, books.original_title, books.first, books.author_id, books.copyright_expired, books.style_id FROM book_texts
+        CREATE VIEW IF NOT EXISTS latest_book_texts AS SELECT book_texts.*, books.title, books.title_reading, books.title_key, books.subtitle, books.subtitle_reading, books.original_title, books.first, books.author_id, books.copyright_expired, books.style_id, books.published_at, books.last_updated_at FROM book_texts
             INNER JOIN books ON books.id = book_texts.book_id
             GROUP BY book_id HAVING revision = MAX(revision)
         """
